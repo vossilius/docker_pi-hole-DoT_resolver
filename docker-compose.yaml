@@ -1,0 +1,124 @@
+# Docker-Compose file for Pi-hole 5 + DNS over TLS using unbound
+# For use on Raspberry Pi
+#
+#
+# Ensure to edit /etc/docker/daemon.json (create file if needed) as sudo
+#  {
+#    "ipv6": true,
+#    "fixed-cidr-v6": "fd00::cafe:0:0:0/80"
+#  }
+# Save the file and reload Docker:
+# $ systemctl reload docker
+
+version: '2.2'
+
+services:
+  pihole:
+    container_name: pihole
+    image: pihole/pihole:latest            # https://github.com/pi-hole/docker-pi-hole
+    hostname: pihole                       # your container's hostname
+    domainname: muppetnet.local            # your domain name of your pihole container
+    group_add:
+      - www-data
+    mac_address:  02:42:C0:A8:01:0A        # replace with a random mac address, use this website (pick top number): https://www.hellion.org.uk/cgi-bin/randmac.pl?scope=local&type=unicast
+
+    cap_add:
+      - NET_ADMIN
+    networks:
+      macvlan0:
+        ipv4_address: 192.168.1.10         # replace with an unused ip address on your network to assign to the Pi-hole instance (not ip address of the physical server), prevent collision with DHCP range of your router
+        ipv6_address: fd00::cafe:0:0:10
+    dns:
+      - 127.0.0.1
+      - 1.1.1.2                            # alternative DNS should Pi-hole go down
+      - 1.0.0.2                            # alternative secondary DNS
+
+    ports:
+      - 443/tcp
+      - 53/tcp
+      - 53/udp
+      #- 67/udp                            # needs to be open if Pi-hole is doing DHCP
+      - 80/tcp
+
+    environment:
+      ServerIP: 192.168.1.10               # ipv4_address (as above)
+      IPv6: "true"
+      ServerIPv6: fd00::cafe:0:0:10        # ipv6_address (as above)
+      VIRTUAL_HOST: pihole.muppetnet.local # hostname + domainname
+      TZ: "Europe/Berlin"                  # set your time zone
+      DNS1: 192.168.1.11                   # DNS3: fd00::cafe:0:0:11 (set in GUI)
+      DNS2: 192.168.1.12                   # DNS4: fd00::cafe:0:0:12 (set in GUI)
+    restart: unless-stopped
+    volumes:
+      - ./etc/pihole:/etc/pihole
+      - ./etc/dnsmasq.d:/etc/dnsmasq.d
+      - ./html/pihole:/var/www/html/pihole
+      
+  cloudflare-dns-tls:
+    image: qmcgaw/cloudflare-dns-server     # https://github.com/qdm12/cloudflare-dns-server
+    container_name: cloudflare-dns-tls
+    hostname: DNS1
+    mac_address: 02:42:C0:A8:01:0B          # replace with a random mac address, use this website (pick top number): https://www.hellion.org.uk/cgi-bin/randmac.pl?scope=local&type=unicast
+    environment:
+      - VERBOSITY=0                         # From 0 (no log) to 5 (full debug log)
+      - VERBOSITY_DETAILS=0                 # From 0 to 4 (higher means more details)
+      - BLOCK_MALICIOUS=off                 # on or off, to block malicious IP addresses and malicious hostnames from being resolved
+      - BLOCK_SURVEILLANCE=off              # on or off, to block surveillance IP addresses and hostnames from being resolved
+      - BLOCK_ADS=off                       # on or off, to block ads IP addresses and hostnames from being resolved
+      - BLOCK_IPS=                          # comma separated list of IPs to block from being returned to clients
+      - BLOCK_HOSTNAMES=                    # comma separated list of hostnames to block from being resolved
+      - UNBLOCK=                            # comma separated list of hostnames to leave unblocked
+      - PROVIDERS=cloudflare                # Comma separated list of DNS-over-TLS providers from cloudflare, google, quad9, quadrant, cleanbrowsing, securedns, libredns and cira
+      - UPDATE_PERIOD=24h                   # Period to update block lists and restart Unbound. Set to 0 to disable.
+      - CACHING=on                          # on or off. It can be useful if you have another DNS (i.e. Pihole) doing the caching as well on top of this container
+      - PRIVATE_ADDRESS=                    # Comma separated list of CIDRs or single IP addresses (All IPv4 and IPv6 CIDRs private ranges). Note that the default setting prevents DNS rebinding
+      - IPV4=on
+      - IPV6=on                             # on or off. Uses DNS resolution for IPV6. Do not enable if you don't have IPV6
+      - LISTENINGPORT=53
+    networks:
+      macvlan0:
+        ipv4_address: 192.168.1.11          # ipv4_address (as above)
+        ipv6_address: fd00::cafe:0:0:11     # ipv6_address (as above)
+    restart: unless-stopped
+
+ quad9-dns-tls:
+    image: qmcgaw/cloudflare-dns-server     # https://github.com/qdm12/cloudflare-dns-server
+    container_name: quad9-dns-tls
+    hostname: DNS2
+    mac_address: 02:42:C0:A8:01:0C          # replace with a random mac address, use this website (pick top number): https://www.hellion.org.uk/cgi-bin/randmac.pl?scope=local&type=unicast
+    environment:
+      - VERBOSITY=0                         # From 0 (no log) to 5 (full debug log)
+      - VERBOSITY_DETAILS=0                 # From 0 to 4 (higher means more details)
+      - BLOCK_MALICIOUS=off                 # on or off, to block malicious IP addresses and malicious hostnames from being resolved
+      - BLOCK_SURVEILLANCE=off              # on or off, to block surveillance IP addresses and hostnames from being resolved
+      - BLOCK_ADS=off                       # on or off, to block ads IP addresses and hostnames from being resolved
+      - BLOCK_IPS=                          # comma separated list of IPs to block from being returned to clients
+      - BLOCK_HOSTNAMES=                    # comma separated list of hostnames to block from being resolved
+      - UNBLOCK=                            # comma separated list of hostnames to leave unblocked
+      - PROVIDERS=quad9                     # Comma separated list of DNS-over-TLS providers from cloudflare, google, quad9, quadrant, cleanbrowsing, securedns, libredns and cira
+      - UPDATE_PERIOD=24h                   # Period to update block lists and restart Unbound. Set to 0 to disable.
+      - CACHING=on                          # on or off. It can be useful if you have another DNS (i.e. Pihole) doing the caching as well on top of this container
+      - PRIVATE_ADDRESS=                    # Comma separated list of CIDRs or single IP addresses (All IPv4 and IPv6 CIDRs private ranges). Note that the default setting prevents DNS rebinding
+      - IPV4=on
+      - IPV6=on                             # on or off. Uses DNS resolution for IPV6. Do not enable if you don't have IPV6
+      - LISTENINGPORT=53
+    networks:
+      macvlan0:
+        ipv4_address: 192.168.1.12          # ipv4_address (as above)
+        ipv6_address: fd00::cafe:0:0:12     # ipv6_address (as above)
+    restart: unless-stopped
+
+networks:
+  macvlan0:
+    enable_ipv6: true                       # docker-compose version MUST be < '3' and this MUST come before driver call or else docker-compose will not run!
+    driver: macvlan
+    driver_opts:
+      parent: eth0                          # network adapter to connect to 
+      macvlan_mode: bridge
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24            # local network subnet
+          gateway: 192.168.1.1              # router ip
+          ip_range: 192.168.1.10/29         # 192.168.1.9 - 192.168.1.14
+        - subnet: fd00::cafe:0:0:0/64       # ULA subnet
+          gateway: fd00::cafe:0:0:1         # 
